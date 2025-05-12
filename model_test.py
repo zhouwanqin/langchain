@@ -14,7 +14,7 @@ def create_llm():
         model="qwen-plus",
         openai_api_key=os.getenv("DASHSCOPE_API_KEY"),
         openai_api_base="https://dashscope.aliyuncs.com/compatible-mode/v1",
-        max_tokens=1024,
+        max_tokens=8192,
         extra_body={"enable_thinking": False}
     )
 
@@ -30,40 +30,31 @@ def analyze_prompt(prompt):
                     当输入有“中医的感冒中的语言”明确指向时，指输出其中“语言”一个或几个。
         3. 用户身份：判断用户是“老师”还是“学生”。
         用户的输入是：“{prompt}”
-        请返回一个 JSON 对象，格式如下：
-        {{
-            "知识点": "知识点名称",
-            "激活类别": ["类别1", "类别2"],
-            "用户身份": "老师" 或 "学生"
-        }}
+        请返回一个 JSON 对象
         示例如下：
         用户的输入是：我是一名老师，请问如何分析中医的感冒？
         返回：
         {{
             "知识点": "感冒",
-            "激活类别": ["知识", "语言","认知","文化"],
+            "激活类别": ["知识", "语言", "认知", "文化"],
             "用户身份": "老师" 
         }}
+        请你一定只返回json格式！！！！其他什么都不要返回！！！
         """
     )
     messages = [SystemMessage(content=analysis_prompt.format(prompt=prompt))]
-    try:
-        response = llm.invoke(messages)
-        analysis_result = json.loads(response.content)
-        return analysis_result
-    except (json.JSONDecodeError, ValueError):
-        return {
-            "知识点": "中医",
-            "激活类别": ["知识"],
-            "用户身份": "学生"
-        }
+    response = llm(messages)
+    result = json.loads(response.content)
+    knowledge_point = result.get("知识点")
+    activated_categories = result.get("激活类别")
+    return knowledge_point, activated_categories
 
 # 定制每个类别的 Prompt
 def get_category_prompt(category, knowledge_point, knowledge_content=None):
     prompts = {
         "知识": SystemMessage(
             content=f"""
-            请你设计一个{knowledge_point}文本，不要分点，在一个情景中用较为生活化的语言表达，多一些专业知识
+            请你设计一个中医的情景文本，{knowledge_point}文本，不要分点，在一个情景中用较为生活化的语言表达，多一些专业知识
             示例如下：
             感冒
             小李这几天感觉身体不对劲，天气变化大，早上出门没注意添衣，晚上又淋了点雨，第二天就出现了嗓子干痒、鼻子里热热的、轻微头疼的症状。他量了体温，有点低烧，知道自己可能感冒了。
@@ -105,28 +96,16 @@ def get_category_prompt(category, knowledge_point, knowledge_content=None):
             ),
         "认知": SystemMessage(
             content=f"""
-            根据我提供的语言点内容，熟悉与“{knowledge_point}”相关的文化和历史。以下是语言点内容：{knowledge_content}
-            示例如下：
-            一、汉字书写填空
+            根据我提供的语言点内容，进行对应的中医汉语语言点出题，以下是语言点内容：{knowledge_content}
+            仿照以下，要求题目准确：
+            #一、汉字书写填空
             说明：根据拼音填写正确的汉字。
             他因为生病了，所以买了些中药___热解___。
             中医看病的时候会给病人___脉。
             他的鼻子里热热的，可能是___感冒。
             你最近睡觉前用___草泡脚吗？
             这个药方里有___翘和金___花。
-            二、汉字改错
-            说明：找出下列句子中的错别字并改正。
-            他把脉之后，医生说他是风热感冒。
-            错误字：______ → 正确字：______
-            迎香穴可以帮助鼻子通气。
-            错误字：______ → 正确字：______
-            薄荷可以疏风散热。
-            错误字：______ → 正确字：______
-            金银花是一种常用的中草药。
-            错误字：______ → 正确字：______
-            牛榜子对喉咙痛有帮助。
-            错误字：______ → 正确字：______
-            三、词语填空
+            #二、词语填空
             说明：从括号中选择合适的词语填入空格。
             小李嗓子干痒，医生___他多喝温水，早点休息。（要求 / 建议）
             中医讲究___，不是随便开药。（整体调理 / 辨证论治）
@@ -135,7 +114,7 @@ def get_category_prompt(category, knowledge_point, knowledge_content=None):
             吃了清热解毒的中药后，他的___减轻了。（情况 / 症状）
             中医认为感冒是因为外邪侵袭肺卫。
             中医认为感冒是因为___侵袭肺卫。（病菌 / 外邪）
-            四、同义词选择
+            #三、同义词选择
             说明：选出与划线词意思最相近的一项。
             医生开了几副中药，主要是银花、连翘等药材。
             “主要”的意思是：
@@ -152,7 +131,7 @@ def get_category_prompt(category, knowledge_point, knowledge_content=None):
             小李这几天身体不舒服，可能感冒了。
             “可能”的意思是：
             A. 一定 B. 或许 C. 绝对 D. 已经
-            五、语法造句
+            #四、语法造句
             说明：请用下面的语法结构或词语造一个句子。
             得 + 动词
             例句：这得赶紧调理一下。
@@ -223,6 +202,7 @@ async def run_parallel_models(knowledge_point, categories):
             cat_output = await run_model(llm, messages)
             results[category] = cat_output
     return results
+
 # 总模型提炼输出
 def summarize_outputs(prompt, category_outputs, activated_categories):
     llm = create_llm()
@@ -230,15 +210,15 @@ def summarize_outputs(prompt, category_outputs, activated_categories):
 
     summary_prompt = PromptTemplate.from_template(
         """
-        你是教学设计专家，根据我提供的{category_outputs}内容，不改动这里面的内容进行完整输出，生成一份完整的教学设计：
+        你是教学案例设计专家，根据我提供的{category_outputs}内容，不改动这里面的内容进行完整输出，生成一份完整的个性化教案：
         包括以下几个部分：
+        开头为：个性化教案
         1. 教学目标：根据内容，设定明确的教学目标，包括知识点拆解。
-        2. 教学内容：根据内容，梳理教学内容。
-        3. 教学方法：根据内容，设计知识、语言点认知故事。
-        4. 教学评价：根据内容，设计题目。
-        5. 教学建议：根据内容，给出教学建议。
-        
-        请不要删减内容，生成一个完整的回答，以表格形式输出。
+        2. 教学内容：根据内容，完整引用[知识]内容，并对[知识]的内容进行解析。
+        3. 教学方法：根据内容，完整引用[语言][认知]内容，并进行简单提要。
+        4. 教学评价：根据内容，反思整体设计思路。
+        5. 教学补充：根据内容，完整引用[文化]内容，并作注释。
+        请你整理输出的格式，要求规范美观，并且不遗漏删改所引用的[知识][语言][认知][文化]
         """
     )
     messages = [

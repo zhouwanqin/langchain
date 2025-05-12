@@ -1,6 +1,5 @@
 import os
 import asyncio
-import streamlit as st
 import json
 from langchain_community.chat_models import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -19,77 +18,172 @@ def create_llm():
         extra_body={"enable_thinking": False}
     )
 
-# 使用大模型进行 Prompt 分类
-def classify_prompt_with_llm(prompt):
+# 提取输入 prompt 的“知识点”、“激活类别”和“用户身份”
+def analyze_prompt(prompt):
     llm = create_llm()
-    categories = ["中医基础知识", "语言", "中医文化", "中医认知"]
-    
-    classification_prompt = PromptTemplate.from_template(
+    analysis_prompt = PromptTemplate.from_template(
         """
-        你是一位智能分类器，擅长分析用户输入的问题并判断其所属类别。现有以下类别：
-        - 中医基础知识：涉及针灸、中药、经络、穴位、方剂、诊断等实用知识。
-        - 语言：涉及翻译、对话、表达优化、语法等语言相关问题。
-        - 中医文化：涉及中医历史、哲学、阴阳、五行等文化和思想内涵。
-        - 中医认知：涉及中医的思维方式、理论框架、观念等抽象认知。
-        
-        用户输入的问题是：“{prompt}”
-        
-        请分析该问题，判断它属于哪些类别（可能属于多个类别）。返回一个 JSON 格式的列表，包含匹配的类别名称。如果没有明确匹配，默认返回 ["中医认知"]。
-        
-        示例：
-        输入：“请你介绍中医的感冒？”
-        输出：```json
-        ["中医文化", "中医认知","中医认知"]
-        ```
-        输入：“如何用中药治疗感冒？”
-        输出：```json
-        ["中医基础知识"]
-        ```
+        你是一位智能分析器，擅长从用户输入中提取以下信息：
+        1. 知识点：识别用户问题中涉及的具体知识点，如“感冒”、“头疼”等。
+        2. 激活类别：判断问题涉及的类别，包括“知识”、“语言”、“认知”、“文化”，可能包含一个或多个类别
+                    当输入只有“中医的感冒”这样较为笼统的概念时，同时包含四个内容
+                    当输入有“中医的感冒中的语言”明确指向时，指输出其中“语言”一个或几个。
+        3. 用户身份：判断用户是“老师”还是“学生”。
+        用户的输入是：“{prompt}”
+        请返回一个 JSON 对象，格式如下：
+        {{
+            "知识点": "知识点名称",
+            "激活类别": ["类别1", "类别2"],
+            "用户身份": "老师" 或 "学生"
+        }}
+        示例如下：
+        用户的输入是：我是一名老师，请问如何分析中医的感冒？
+        返回：
+        {{
+            "知识点": "感冒",
+            "激活类别": ["知识", "语言","认知","文化"],
+            "用户身份": "老师" 
+        }}
         """
     )
-    
-    messages = [SystemMessage(content=classification_prompt.format(prompt=prompt))]
+    messages = [SystemMessage(content=analysis_prompt.format(prompt=prompt))]
     try:
         response = llm.invoke(messages)
-        # 尝试解析 JSON 输出
-        matched_categories = json.loads(response.content)
-        # 验证类别有效性
-        matched_categories = [cat for cat in matched_categories if cat in categories]
-        return matched_categories if matched_categories else ["中医认知"]
+        analysis_result = json.loads(response.content)
+        return analysis_result
     except (json.JSONDecodeError, ValueError):
-        # 如果 JSON 解析失败或输出无效，默认返回 ["中医认知"]
-        st.warning("分类器输出格式错误，默认归类为‘中医认知’。")
-        return ["中医认知"]
+        return {
+            "知识点": "中医",
+            "激活类别": ["知识"],
+            "用户身份": "学生"
+        }
 
 # 定制每个类别的 Prompt
-def get_category_prompt(category, user_prompt):
+def get_category_prompt(category, knowledge_point, knowledge_content=None):
     prompts = {
-        "中医基础知识":
-             SystemMessage(
-                 content="""
-                 你是一位中医专家，擅长解释针灸、中药、经络等实用知识。请以专业、准确的语言回答，注重实用性和科学依据：
-                 """
-                 ),
-        "语言": 
-            SystemMessage(
-                content="""
-                你是一位语言专家，擅长处理翻译、表达优化等语言问题。请以清晰、简洁的语言回答，注重表达的流畅性：
-                """
-                ),
-        "中医文化": 
-            SystemMessage(
-                content="""
-                你是一位中医文化研究者，熟悉中医历史、哲学和阴阳五行等内涵。请以深入且引人入胜的方式回答，突出文化价值：
-                """
-                ),
-        "中医认知": 
-            SystemMessage(
-                content="""
-                你是一位中医理论家，擅长分析中医的思维方式和理论框架。请以逻辑清晰、富有洞察力的方式回答，强调理论深度：
-                """
-                )
+        "知识": SystemMessage(
+            content=f"""
+            请你设计一个{knowledge_point}文本，不要分点，在一个情景中用较为生活化的语言表达，多一些专业知识
+            示例如下：
+            感冒
+            小李这几天感觉身体不对劲，天气变化大，早上出门没注意添衣，晚上又淋了点雨，第二天就出现了嗓子干痒、鼻子里热热的、轻微头疼的症状。他量了体温，有点低烧，知道自己可能感冒了。
+            他妈妈看决定带他去附近的中医诊所看看。老中医先是仔细询问了病情，包括症状出现的时间、性质以及是否有恶寒、发热等感受，并观察了他的面色和舌象。接着通过把脉，了解到小李的脉象浮数，这是典型的外感风热之象。根据中医理论，感冒主要是由于人体正气不足，卫外不固，导致风邪侵袭肺卫所致，而小李的情况属于风热犯肺。
+            老中医为小李开具了一副中药方子，主要成分包括金银花（清热解毒）、连翘（疏散风热、清热解毒）、牛蒡子（疏散风热、利咽透疹）、薄荷（疏风散热）、桔梗（宣肺祛痰）等。这些药材组合起来，旨在辛凉解表，清热解毒，以达到驱散外邪、恢复肺卫功能的目的。
+            同时，医生还建议小李多喝温开水，保持室内空气流通，避免再次受寒。此外，老中医提到可以适量食用一些具有润肺止咳作用的食物，如梨子，可以帮助缓解咳嗽和喉咙不适。回家后，小李妈妈按照医嘱给他熬制了药汤，并且煮了一碗姜糖水，帮助发汗解表。
+            经过几天的调养，小李的症状逐渐减轻，体力也慢慢恢复。
+            """
+            ),
+        "语言": SystemMessage(
+            content=f"""
+            汉语语言教学专家，擅长处理与“{knowledge_point}”相关的汉语知识点问题。根据我给的这个内容进行语言点生成提取：{knowledge_content}
+            要求：进行外国人学习汉语的语言点提取，配合简单的英文解读，要求有一般生词、专名术语、语法示例等
+            示例如下：
+            一般生词与短语
+            添衣 (tiān yī) - Add clothes. To put on more clothes due to cold weather.
+            淋了点雨 (lín le diǎn yǔ) - Got caught in a little rain. To get wet by rain slightly.
+            嗓子干痒 (sǎng zi gàn yǎng) - Sore and itchy throat. A condition of the throat that feels dry and itchy.
+            鼻子里热热的 (bí zi li rè rè de) - Nose feels hot. It refers to the sensation of having a warm or feverish nose.
+            头疼 (tóu téng) - Headache. Pain in the head.
+            把脉 (bǎ mài) - Take the pulse. Traditional Chinese medicine practice of feeling the pulse to diagnose illness.
+            风热感冒 (fēng rè gǎn mào) - Wind-heat cold. A type of common cold characterized by symptoms like sore throat, nasal congestion with yellow mucus, etc.
+            专名术语
+            金银花 (jīn yín huā) - Honeysuckle. Known for its properties to clear heat and detoxify.
+            连翘 (lián qiáo) - Forsythia suspensa. Used for clearing heat and resolving toxins.
+            牛蒡子 (niú bàng zǐ) - Great burdock seed. Helps in relieving sore throat and promoting eruption of rashes.
+            薄荷 (bò he) - Mint. Often used to disperse wind-heat and clear the head.
+            桔梗 (jú gěng) - Balloon flower root. Commonly used for its effects on promoting lung function and expelling phlegm.
+            迎香穴 (yíng xiāng xué) - Yingxiang acupoint. Located beside the nostrils, used for treating nasal congestion.
+            风池穴 (fēng chí xué) - Fengchi acupoint. Found at the back of the neck, beneficial for headache and neck stiffness.
+            语法示例
+            得……一下
+            例子：他妈妈看他蔫蔫的样子，就说：“这得赶紧调理一下，别拖成重感冒。”
+            Translation: Seeing him looking listless, his mother said, "We need to treat this quickly before it turns into a severe cold."
+            开了几副……主要是……
+            例子：医生开了几副中药，主要是银花、连翘、牛蒡子这些清热解毒的药材。
+            Translation: The doctor prescribed several doses of herbal medicine, mainly honeysuckle, forsythia, and great burdock seeds which are good for clearing heat and detoxifying.
+            """
+            ),
+        "认知": SystemMessage(
+            content=f"""
+            根据我提供的语言点内容，熟悉与“{knowledge_point}”相关的文化和历史。以下是语言点内容：{knowledge_content}
+            示例如下：
+            一、汉字书写填空
+            说明：根据拼音填写正确的汉字。
+            他因为生病了，所以买了些中药___热解___。
+            中医看病的时候会给病人___脉。
+            他的鼻子里热热的，可能是___感冒。
+            你最近睡觉前用___草泡脚吗？
+            这个药方里有___翘和金___花。
+            二、汉字改错
+            说明：找出下列句子中的错别字并改正。
+            他把脉之后，医生说他是风热感冒。
+            错误字：______ → 正确字：______
+            迎香穴可以帮助鼻子通气。
+            错误字：______ → 正确字：______
+            薄荷可以疏风散热。
+            错误字：______ → 正确字：______
+            金银花是一种常用的中草药。
+            错误字：______ → 正确字：______
+            牛榜子对喉咙痛有帮助。
+            错误字：______ → 正确字：______
+            三、词语填空
+            说明：从括号中选择合适的词语填入空格。
+            小李嗓子干痒，医生___他多喝温水，早点休息。（要求 / 建议）
+            中医讲究___，不是随便开药。（整体调理 / 辨证论治）
+            风池穴在脖子后面，___它可以缓解头痛。（按压 / 按摩）
+            吃了清热解毒的中药后，他的症状减轻了。
+            吃了清热解毒的中药后，他的___减轻了。（情况 / 症状）
+            中医认为感冒是因为外邪侵袭肺卫。
+            中医认为感冒是因为___侵袭肺卫。（病菌 / 外邪）
+            四、同义词选择
+            说明：选出与划线词意思最相近的一项。
+            医生开了几副中药，主要是银花、连翘等药材。
+            “主要”的意思是：
+            A. 很多 B. 最重要的 C. 一部分 D. 全部
+            他感觉胃里暖洋洋的，整个人都轻松了。
+            “轻松”的意思是：
+            A. 快乐 B. 不舒服 C. 放松 D. 忙碌
+            风热感冒的症状是发烧、喉咙痛、流黄鼻涕。
+            “症状”的意思是：
+            A. 表现 B. 治疗方法 C. 药物反应 D. 诊断结果
+            中医通过把脉和看舌象来判断病情。
+            “判断”的意思是：
+            A. 知道 B. 决定 C. 分析 D. 记录
+            小李这几天身体不舒服，可能感冒了。
+            “可能”的意思是：
+            A. 一定 B. 或许 C. 绝对 D. 已经
+            五、语法造句
+            说明：请用下面的语法结构或词语造一个句子。
+            得 + 动词
+            例句：这得赶紧调理一下。
+            请造句：_________________________________________________________
+            ...觉得...
+            例句：小李喝完觉得胃里暖洋洋的。
+            请造句：_________________________________________________________
+            主要 + 是/用来...
+            例句：这副药主要是用来清热解毒的。
+            请造句：_________________________________________________________
+            为了 + 目的
+            例句：为了增强抵抗力，妈妈给他泡了艾草脚。
+            请造句：_________________________________________________________
+            不是...而是...
+            例句：中医治疗不是压制症状，而是调和身体。
+            请造句：_________________________________________________________
+            """
+            ),
+        "文化": SystemMessage(
+            content=f"""
+            中华传统文化专家，擅长编写“{knowledge_point}”的相关故事，请你根据中华传统文化相关内容，用生活化语言写一段有理有据、有来源有出处的故事，不要分点以文段形式输出”
+            示例如下：
+            唐朝那会儿，长安城里有个叫孙思邈的大夫，医术高明，百姓都尊他为“药王”。有一年春天，天气忽冷忽热，不少人都感冒了，咳嗽、发烧、鼻塞、喉咙痛，一时间看病的人络绎不绝。有位刚中了进士的年轻人，本该在家好好歇着准备入朝谢恩，却急着赶路进京，结果一到长安就病倒了，头昏脑胀，嗓子干得像冒烟，鼻子也不通气，连饭都吃不下，只好找人推荐去求诊于孙思邈。
+            孙思邈一看他这副模样，先没急着开药，而是让他坐下，闭上眼睛，慢慢呼吸，静了一会儿。接着，他拿起银针，在这位书生的脖子后面和手背上轻轻扎了几针，说是帮他散散风热。然后又让徒弟熬了一碗汤药，里面有金银花、连翘、薄荷这些清热解毒的药材，还特意加了一碗生姜红糖水让他喝下去，说能发汗驱寒。
+            孙大夫一边给他调理，一边叮嘱他说：“你现在身子虚，最怕再吹风受凉，这几天要早睡早起，别看书看太晚，吃饭也别贪嘴，心也别太急。”年轻人一一照做，果然三天后症状就轻了不少，五天下来整个人精神多了，走路也有力气了。
+            后来他问孙思邈：“为何我一路奔波，偏偏到了京城才病？”孙思邈笑着答道：“你身体本就疲惫，风邪趁你正气虚弱时钻了空子。《黄帝内经》里讲‘正气存内，邪不可干’，只要平时注意保养，饮食有节，起居有常，哪那么容易生病？”
+            这位书生听了深受启发，从此不仅自己注重养生，还在后来当官的日子里把这些道理讲给百姓听。他常说：“治病不如防病，强身胜过吃药。”这事虽没有写在史书里，但在民间流传已久，成了中医讲究“扶正祛邪”、“治未病”的一个活生生的例子。
+            """
+            )
     }
-    return [prompts[category], HumanMessage(content=user_prompt)]
+    return [prompts[category], HumanMessage(content=knowledge_point)]
 
 # 异步运行单个模型
 async def run_model(llm, messages):
@@ -97,95 +191,64 @@ async def run_model(llm, messages):
         response = await llm.ainvoke(messages)
         return response.content
     except Exception as e:
-        st.error(f"模型运行错误：{str(e)}")
-        return "模型运行失败，请检查 API 配置或网络连接。"
+        return f"模型运行失败：{str(e)}"
 
-# 并行运行所有模型
-async def run_parallel_models(prompt, categories):
+async def run_parallel_models(knowledge_point, categories):
     llm = create_llm()
-    tasks = []
-    for category in categories:
-        messages = get_category_prompt(category, prompt)
-        tasks.append(run_model(llm, messages))
+    results = {}
     
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    return dict(zip(categories, results))
+    # 先运行“知识”模型
+    knowledge_messages = get_category_prompt("知识", knowledge_point)
+    knowledge_output = await run_model(llm, knowledge_messages)
+    results["知识"] = knowledge_output
 
+    # 根据“知识”模型输出运行“语言”模型
+    if "语言" in categories:
+        language_messages = get_category_prompt("语言", knowledge_point, knowledge_output)
+        language_output = await run_model(llm, language_messages)
+        results["语言"] = language_output
+    else:
+        language_output = None
+
+    # 根据“语言”模型输出运行“认知”模型
+    if "认知" in categories:
+        cognition_messages = get_category_prompt("认知", knowledge_point, language_output)
+        cognition_output = await run_model(llm, cognition_messages)
+        results["认知"] = cognition_output
+
+    # 其余类别（如“文化”）仍根据“知识”模型输出
+    for category in categories:
+        if category not in ("知识", "语言", "认知"):
+            messages = get_category_prompt(category, knowledge_point, knowledge_output)
+            cat_output = await run_model(llm, messages)
+            results[category] = cat_output
+    return results
 # 总模型提炼输出
-def summarize_outputs(prompt, category_outputs):
+def summarize_outputs(prompt, category_outputs, activated_categories):
     llm = create_llm()
+    selected_outputs = {cat: category_outputs[cat] for cat in activated_categories}
+
     summary_prompt = PromptTemplate.from_template(
         """
-        你是一位综合分析专家，擅长从多角度提炼信息。以下是针对用户问题“{prompt}”的分类回答：
-        {category_outputs}
+        你是教学设计专家，根据我提供的{category_outputs}内容，不改动这里面的内容进行完整输出，生成一份完整的教学设计：
+        包括以下几个部分：
+        1. 教学目标：根据内容，设定明确的教学目标，包括知识点拆解。
+        2. 教学内容：根据内容，梳理教学内容。
+        3. 教学方法：根据内容，设计知识、语言点认知故事。
+        4. 教学评价：根据内容，设计题目。
+        5. 教学建议：根据内容，给出教学建议。
         
-        请综合以上信息，生成一个简洁、连贯且全面的回答，突出核心观点，避免冗余。回答应：
-        - 结构清晰，分点或段落组织。
-        - 语言流畅，适合普通用户理解。
-        - 保留各分类视角的独特贡献。
+        请不要删减内容，生成一个完整的回答，以表格形式输出。
         """
     )
     messages = [
         SystemMessage(content=summary_prompt.format(
             prompt=prompt,
-            category_outputs="\n".join([f"{cat}: {out}" for cat, out in category_outputs.items()])
+            category_outputs="\n".join([f"{cat}: {out}" for cat, out in selected_outputs.items()])
         ))
     ]
     try:
         response = llm.invoke(messages)
         return response.content
     except Exception as e:
-        st.error(f"提炼模型运行错误：{str(e)}")
-        return "提炼失败，请检查 API 配置或网络连接。"
-
-# Streamlit 界面
-def main():
-    st.title("中医问题智能分析系统")
-    st.markdown("""
-        欢迎使用中医问题分析系统！请输入您的问题，系统将：
-        1. 使用大模型分析问题所属类别（中医基础知识、语言、中医文化、中医认知）。
-        2. 从对应视角生成专业回答。
-        3. 综合提炼出简洁、全面的最终回答。
-    """)
-
-    # 用户输入
-    user_prompt = st.text_area("请输入您的问题：", height=150, placeholder="例如：中医的阴阳理论如何影响诊断？")
-
-    if st.button("提交", key="submit"):
-        if not user_prompt:
-            st.error("请输入问题！")
-            return
-
-        # 显示用户输入
-        st.subheader("您的问题：")
-        st.write(user_prompt)
-
-        # 使用大模型分类
-        with st.spinner("正在分析问题类别..."):
-            categories = classify_prompt_with_llm(user_prompt)
-        st.subheader("问题分类：")
-        st.write(", ".join(categories))
-
-        # 并行运行模型
-        with st.spinner("正在生成分类回答..."):
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            category_outputs = loop.run_until_complete(run_parallel_models(user_prompt, categories))
-            loop.close()
-
-        # 显示各模型输出（调试用，可注释）
-        st.subheader("各模型输出（调试用）：")
-        for category, output in category_outputs.items():
-            with st.expander(f"{category}"):
-                st.write(output)
-
-        # 提炼最终回答
-        with st.spinner("正在提炼最终回答..."):
-            final_answer = summarize_outputs(user_prompt, category_outputs)
-        
-        # 显示最终回答
-        st.subheader("最终回答：")
-        st.markdown(final_answer)
-
-if __name__ == "__main__":
-    main()
+        return f"提炼失败：{str(e)}"

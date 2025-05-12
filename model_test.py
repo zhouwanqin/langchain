@@ -97,7 +97,7 @@ def get_category_prompt(category, knowledge_point, knowledge_content=None):
         "认知": SystemMessage(
             content=f"""
             根据我提供的语言点内容，进行对应的中医汉语语言点出题，以下是语言点内容：{knowledge_content}
-            仿照以下，要求题目准确：
+            仿照以下，做到形式上的完美模仿：
             #一、汉字书写填空
             说明：根据拼音填写正确的汉字。
             他因为生病了，所以买了些中药___热解___。

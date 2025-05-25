@@ -11,3 +11,4 @@ docx2txt
 Pillow
 faiss-cpu>=1.7.4  # 使用一个较新的稳定版本
 langchain-community  # 如果你正在使用的功能已经被移到了这个包中，则需要添加这一行
+pypdf

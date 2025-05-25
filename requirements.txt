@@ -1,12 +1,12 @@
 streamlit
-langchain
 langchain-openai
 openai
 dashscope
 sentence-transformers
-faiss-cpu
 pandas
 pytesseract
 pdf2image
 docx2txt
 Pillow
+langchain>=0.1.0
+faiss-cpu>=1.7.0

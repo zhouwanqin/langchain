@@ -1,4 +1,5 @@
 streamlit
+langchain>=0.1.7  # 确保使用最新版本的langchain以避免API变动问题
 langchain-openai
 openai
 dashscope
@@ -8,5 +9,5 @@ pytesseract
 pdf2image
 docx2txt
 Pillow
-langchain>=0.1.0
-faiss-cpu>=1.7.0
+faiss-cpu>=1.7.4  # 使用一个较新的稳定版本
+langchain-community  # 如果你正在使用的功能已经被移到了这个包中，则需要添加这一行

@@ -1,5 +1,12 @@
 streamlit
 langchain
-langchain_community
+langchain-openai
 openai
-aiohttp
+dashscope
+sentence-transformers
+faiss-cpu
+pandas
+pytesseract
+pdf2image
+docx2txt
+Pillow

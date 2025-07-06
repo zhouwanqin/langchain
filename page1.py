@@ -45,11 +45,12 @@ DEFAULT_PROMPT = """
 
 请以 Markdown 表格格式返回完整的教学框架内容。
 """
+
 # 初始化语言模型
 def create_llm(temperature=0.7, top_k=50):
     """初始化ChatOpenAI模型"""
     return ChatOpenAI(
-        model="qwen-plus",
+        model="qwen-max-2025-01-25",
         openai_api_key=os.getenv("DASHSCOPE_API_KEY"),
         openai_api_base="https://dashscope.aliyuncs.com/compatible-mode/v1",
         max_tokens=8192,
@@ -179,8 +180,10 @@ def page1():
         # 显示结果
         st.write("### 解析结果")
         st.markdown(response, unsafe_allow_html=True)
+        return response
     elif start_button and not user_input:
         st.warning("请输入文本内容后再点击开始！")
+    return None
 
 if __name__ == "__main__":
     page1()
